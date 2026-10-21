@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-21
+
 ### Added
 
 - OpenEPaperLink access point, through its local HTTP API and websocket: the
@@ -58,4 +60,5 @@ the notes of the version's GitHub Release.
 - A healthy websocket stream whose packets end inside a frame is no longer
   closed after 30 s.
 
-[Unreleased]: https://github.com/LM1LC3N7/gladys-openepaperlink/commits/main
+[Unreleased]: https://github.com/LM1LC3N7/gladys-openepaperlink/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/LM1LC3N7/gladys-openepaperlink/releases/tag/v0.1.1
