@@ -80,6 +80,8 @@ export class FrameParser {
     this.payloadFill = 0;
     this.fin = false;
     this.opcode = 0;
+    /** Frames completed so far: a new frame re-arms the deadline of the client. */
+    this.frames = 0;
   }
 
   /** True while a frame is started but not complete. */
@@ -158,6 +160,7 @@ export class FrameParser {
   }
 
   frameDone() {
+    this.frames += 1;
     const frame = { fin: this.fin, opcode: this.opcode, payload: this.payload };
     this.payload = undefined;
     this.payloadFill = 0;
@@ -374,10 +377,15 @@ export class WsClient {
    */
   watchFrame() {
     const busy = this.parser.busy || this.fragments.length > 0;
-    if (!busy) {
+    // A frame completed since the timer was set: the one in progress started
+    // after it, so its 30 s count from now (a healthy stream is never cut).
+    const progressed = this.parser.frames !== this.framesAtTimer;
+    if (!busy || progressed) {
       this.timers.clearTimeout(this.frameTimer);
       this.frameTimer = undefined;
-    } else if (!this.frameTimer && !this.closed) {
+    }
+    if (busy && !this.frameTimer && !this.closed) {
+      this.framesAtTimer = this.parser.frames;
       this.frameTimer = this.timers.setTimeout(
         () => this.end('websocket frame not completed in time'),
         this.timings.frameTimeout,

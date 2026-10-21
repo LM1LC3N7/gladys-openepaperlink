@@ -368,3 +368,29 @@ test('I2 a peer that does not read: closed past 64 KB waiting, nothing more writ
   }
   assert.ok(peak < 1024 * 1024, `pending writes peaked at ${peak} bytes`);
 });
+
+test('R1-2 a healthy stream whose chunks always end inside a frame is never cut', async () => {
+  const clock = fakeClock();
+  const closes = [];
+  const messages = [];
+  const { ws, socket, opened } = fakeHandshake(ok101, {
+    timers: clock.timers,
+    onClose: (r) => closes.push(r),
+    onMessage: (m) => messages.push(m),
+  });
+  assert.equal(await opened, 'open');
+  await clock.settle();
+  const frame = serverFrame(JSON.stringify({ sys: { apstate: 1 } }));
+  const half = Math.floor(frame.length / 2);
+  socket.emit('data', frame.subarray(0, half));
+  for (let i = 0; i < 45; i += 1) {
+    await clock.advance(1_000);
+    socket.emit('data', Buffer.concat([frame.subarray(half), frame.subarray(0, half)]));
+  }
+  assert.equal(ws.closed, false, closes[0]);
+  assert.equal(messages.length, 45);
+  // Then the stream stops in the middle of a frame: closed 30 s later.
+  await clock.advance(30_000);
+  assert.equal(ws.closed, true);
+  assert.match(closes[0], /not completed in time/);
+});

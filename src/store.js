@@ -9,6 +9,7 @@
 //   attemptAt    the time of the last connection attempt (written at most
 //                once a minute), so a container restarting in a loop never
 //                connects faster than the spacing;
+//   uploadHold   the end of a hold of the uploads (409, 5xx of an upload);
 //   resync       when the tag list was last read, and for which address, so
 //                a restart does not read it again sooner than 15 minutes.
 //
@@ -26,6 +27,7 @@ export const emptyData = () => ({
   pause: null,
   attemptAt: null,
   resync: null,
+  uploadHold: null,
 });
 
 const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -51,6 +53,11 @@ export function sanitize(data, now = Date.now()) {
   if (isObject(p) && Number.isFinite(p.until) && p.until > now) {
     // A saved end is never trusted beyond the longest pause.
     base.pause = { until: Math.min(p.until, now + TIMINGS.pauseMax) };
+  }
+  const h = data.uploadHold;
+  if (isObject(h) && Number.isFinite(h.until) && h.until > now) {
+    // A saved end is never trusted beyond the longest hold.
+    base.uploadHold = { until: Math.min(h.until, now + TIMINGS.busyMax) };
   }
   const r = data.resync;
   if (isObject(r) && Number.isFinite(r.at) && typeof r.fingerprint === 'string') {

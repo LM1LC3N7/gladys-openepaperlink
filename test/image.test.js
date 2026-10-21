@@ -42,6 +42,8 @@ test('cleaning: control and invisible characters dropped, typography simplified,
 test('M5 leading blanks never eat the budget, blanks merged', () => {
   assert.equal(cleanDisplayText('\n'.repeat(1000) + 'a'), 'a');
   assert.equal(cleanDisplayText(' '.repeat(300) + 'Bonjour'), 'Bonjour');
+  assert.equal(cleanDisplayText('\u{200b}'.repeat(2000) + 'Bonjour'), 'Bonjour');
+  assert.equal(cleanDisplayText('\u{1}'.repeat(2000) + 'Bonjour'), 'Bonjour');
   assert.equal(cleanDisplayText(' '.repeat(10_000_000) + 'x'), 'x');
   assert.equal(cleanDisplayText('a\n\n\n\n\nb   c'), 'a\n\nb c');
   assert.equal(cleanDisplayText(`a${'\n'.repeat(500)}${'b'.repeat(400)}`).length, LIMITS.textChars);

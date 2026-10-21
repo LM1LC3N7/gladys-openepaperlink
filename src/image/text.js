@@ -32,6 +32,10 @@ const REPLACE = new Map([
   ['ß', 'ss'],
 ]);
 
+/** The first character that is neither blank, control nor invisible. */
+const VISIBLE =
+  // eslint-disable-next-line no-control-regex
+  /[^\s\u{0}-\u{1f}\u{7f}-\u{9f}\u{200b}-\u{200f}\u{202a}-\u{202e}\u{2060}-\u{2064}\u{2066}-\u{2069}\u{feff}]/u;
 /** Zero-width and direction marks: dropped, never drawn. */
 const INVISIBLE =
   /[\u{200b}-\u{200f}\u{202a}-\u{202e}\u{2060}-\u{2064}\u{2066}-\u{2069}\u{feff}]/gu;
@@ -51,7 +55,7 @@ export function cleanDisplayText(value) {
   const all = String(value);
   // Leading blanks never count; then bounded before any work: a huge value
   // costs no more than a long one.
-  const start = all.search(/\S/);
+  const start = all.search(VISIBLE);
   if (start < 0) {
     return '';
   }

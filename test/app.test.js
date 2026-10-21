@@ -428,10 +428,10 @@ test('M8 show a text: a 5xx of the upload or the display type holds the uploads 
   assert.match(failed.error, /refused the text \(500\)/);
   assert.equal(store.data.pause, null, 'no global pause');
   assert.equal(app.ws?.closed, false, 'the websocket stays open');
-  // The uploads wait (5 min by default): the next text cannot leave in time.
+  // The uploads wait (5 min by default): the next text says why it does not leave.
   ap.statuses.clear();
   const held = await show(gladys, { tag: tagId(DESK), text: 'y' });
-  assert.match(held.error, /No time left/);
+  assert.match(held.error, /uploads held until \d\d:\d\d UTC/);
   // A 5xx of /tagtypes neither.
   await clock.advance(TIMINGS.pause5xx);
   ap.statuses.set('/tagtypes/00.json', 503);
@@ -446,7 +446,13 @@ test('M8 show a text: a 5xx of the upload or the display type holds the uploads 
 test('nothing in /data but tags, the pause, the attempt time and the last list reading', async (t) => {
   const { store, clock } = await createdAll(t);
   await clock.advance(2_000);
-  assert.deepEqual(Object.keys(store.data).sort(), ['attemptAt', 'pause', 'resync', 'tags']);
+  assert.deepEqual(Object.keys(store.data).sort(), [
+    'attemptAt',
+    'pause',
+    'resync',
+    'tags',
+    'uploadHold',
+  ]);
   assert.deepEqual(Object.keys(store.data.resync).sort(), ['at', 'fingerprint']);
   assert.deepEqual(Object.keys(store.data.tags).sort(), [KITCHEN, DESK].sort());
   assert.deepEqual(store.data.tags[KITCHEN], { mac: KITCHEN, alias: 'Cuisine', hwType: 1 });
@@ -573,4 +579,32 @@ test('M6 a display too small for one character: refused, nothing uploaded', asyn
   assert.equal(ack.success, false);
   assert.match(ack.error, /too small/);
   assert.equal(ap.uploads.length, 0);
+});
+
+test('R1-1 the hold of the uploads after a 5xx is kept in /data: a restart sends nothing sooner', async (t) => {
+  const store = new MemoryStore();
+  const clock = fakeClock();
+  const ap = fakeAp();
+  const first = await createdAll(t, { store, clock, ap });
+  ap.statuses.set('/imgupload', 500);
+  const failed = await show(first.gladys, { tag: tagId(KITCHEN), text: 'a' });
+  assert.match(failed.error, /\(500\)/);
+  ap.statuses.clear();
+  assert.equal(store.data.uploadHold.until, clock.now() + TIMINGS.pause5xx);
+  await first.app.stop();
+  await clock.advance(30_000);
+  // The container restarts with the same /data.
+  const second = await setup(t, { store, clock, ap });
+  for (const device of first.gladys.fake.devices) {
+    second.gladys.fake.devices.push(device);
+    await second.gladys.fake.deviceCreated(device);
+  }
+  await clock.advance(TIMINGS.attemptSpacing);
+  const uploads = ap.count('/imgupload');
+  const again = await show(second.gladys, { tag: tagId(KITCHEN), text: 'b' });
+  assert.match(again.error, /uploads held until/);
+  assert.equal(ap.count('/imgupload'), uploads, 'nothing sent before the end of the hold');
+  await clock.advance(TIMINGS.pause5xx);
+  const later = await show(second.gladys, { tag: tagId(KITCHEN), text: 'c' });
+  assert.equal(later.success, true);
 });

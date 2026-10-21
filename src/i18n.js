@@ -74,6 +74,8 @@ export const E = {
   replaced: 'Replaced by a newer text for the same tag: not sent',
   late: 'No time left to send this text without rushing the access point: nothing sent',
   paused: 'The access point asked to slow down: nothing sent',
+  held: (until) =>
+    `The access point refused the last upload (busy or 5xx): uploads held until ${clock(until)}, nothing sent`,
   busy: 'The access point is busy: not sent, try again later',
   unreachable: 'The access point is unreachable: nothing sent',
   unconfirmed:

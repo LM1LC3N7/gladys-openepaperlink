@@ -117,7 +117,6 @@ export class OeplApp {
     this.uploading = false;
     this.lastUploadAt = -Infinity;
     this.tagUploadAt = new Map();
-    this.busyUntil = 0;
   }
 
   // --- Lifecycle -------------------------------------------------------------
@@ -818,7 +817,7 @@ export class OeplApp {
     return Math.max(
       this.lastUploadAt + this.timings.uploadSpacing,
       (this.tagUploadAt.get(job.mac) ?? -Infinity) + this.timings.tagSpacing,
-      this.busyUntil,
+      this.uploadHoldUntil(),
     );
   }
 
@@ -836,7 +835,8 @@ export class OeplApp {
       // Not worth waiting: the job could not start before its deadline.
       if (at > job.deadline - 1_000 || this.pausedUntil()) {
         this.queue.splice(this.queue.indexOf(job), 1);
-        job.reject(new Error(this.pausedUntil() ? E.paused : E.late));
+        const held = this.uploadHoldUntil();
+        job.reject(new Error(this.pausedUntil() ? E.paused : held >= at ? E.held(held) : E.late));
         continue;
       }
       if (at <= now && !next) {
@@ -971,25 +971,11 @@ export class OeplApp {
       case KINDS.NO_ANSWER:
         return new Error(sending ? E.unconfirmed : E.unreachable);
       case KINDS.BUSY:
-        this.busyUntil =
-          this.now() +
-          clamp(
-            Number.isFinite(err.retryAfterMs) ? err.retryAfterMs : this.timings.busyMin,
-            this.timings.busyMin,
-            this.timings.busyMax,
-          );
+        this.holdUploads(err.retryAfterMs, this.timings.busyMin);
         return new Error(E.busy);
       case KINDS.UNAVAILABLE:
         if (secondary) {
-          this.busyUntil = Math.max(
-            this.busyUntil,
-            this.now() +
-              clamp(
-                Number.isFinite(err.retryAfterMs) ? err.retryAfterMs : this.timings.pause5xx,
-                this.timings.busyMin,
-                this.timings.busyMax,
-              ),
-          );
+          this.holdUploads(err.retryAfterMs, this.timings.pause5xx);
           return new Error(E.failed(err.status));
         }
         this.pause(err);
@@ -1008,6 +994,26 @@ export class OeplApp {
     }
   }
 
+  /** The end of the hold of the uploads (409, 5xx of an upload), 0 when none. */
+  uploadHoldUntil() {
+    const until = this.data?.uploadHold?.until ?? 0;
+    return until > this.now() ? until : 0;
+  }
+
+  /**
+   * Holds the uploads (Retry-After, else `fallback`, bounded 5 s to 5 min),
+   * kept in /data so a restart does not send sooner; written only when it
+   * moves the end later.
+   */
+  holdUploads(retryAfterMs, fallback) {
+    const wanted = Number.isFinite(retryAfterMs) ? retryAfterMs : fallback;
+    const until = this.now() + clamp(wanted, this.timings.busyMin, this.timings.busyMax);
+    if (until > this.uploadHoldUntil()) {
+      this.data.uploadHold = { until };
+      this.saveNow();
+    }
+  }
+
   /** A task that never holds the caller (its failure is logged). */
   background(task) {
     Promise.resolve()
@@ -1018,8 +1024,9 @@ export class OeplApp {
   // --- Configuration button ------------------------------------------------------------
 
   /**
-   * "Reconnect": a new connection and a new tag list at once, unless an
-   * attempt was made less than the spacing ago (then the current status).
+   * "Reconnect": a new connection at once, unless an attempt was made less
+   * than the spacing ago (then the current status). The tag list is read
+   * again only when its last reading is 15 minutes old (kept in /data).
    */
   async reconnect() {
     await this.loadData();

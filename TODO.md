@@ -169,6 +169,13 @@ up to date at the end of every milestone.
   (Retry-After, else 5 min, bounded 5 s to 5 min); the websocket and
   `get_db` go on. A 5xx of the tag check (`get_db`) or of the tag list, and
   any 429, still pause everything.
+- Review 2: the hold of the uploads (409, 5xx of an upload or a display
+  type) is kept in `/data` (`uploadHold`, bounded to 5 min when read back),
+  so a restart sends nothing sooner; a text dropped because of it says "uploads
+  held until HH:MM UTC"; the 30 s frame deadline counts from the start of the
+  frame in progress (a healthy stream cut mid-frame by its chunks is kept);
+  leading control and invisible characters are skipped before the reading
+  window too.
 - M9 (not changed): drawing and encoding the largest display allowed
   (2000 x 1000, three qualities) blocks the event loop about 0.5 s, bounded;
   lower `LIMITS.displayPixels` if it ever matters.

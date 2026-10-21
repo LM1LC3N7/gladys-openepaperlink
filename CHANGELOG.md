@@ -53,6 +53,9 @@ the notes of the version's GitHub Release.
 - A display too small for one character refuses the text instead of
   reporting an empty image as shown.
 - A 5xx of the display type or of the upload only holds the uploads, no
-  longer the readings and the websocket.
+  longer the readings and the websocket; the hold is kept across restarts,
+  and a text it stops says until when.
+- A healthy websocket stream whose packets end inside a frame is no longer
+  closed after 30 s.
 
 [Unreleased]: https://github.com/LM1LC3N7/gladys-openepaperlink/commits/main
