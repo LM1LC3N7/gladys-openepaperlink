@@ -1,61 +1,86 @@
-# Demo Devices Template
+# OpenEPaperLink
 
-This is the user documentation of the integration. Gladys re-hosts this file
-and shows a permanent **Documentation** link to it in the Configuration screen
-(in the user's language, with English as the fallback) — it is when
-configuring that the user needs it most. Keep the short onboarding hints in
-the `section` blocks of the manifest `config_schema`; put the long
-step-by-step (screenshots, troubleshooting…) here.
+Brings the e-paper tags of an [OpenEPaperLink](https://openepaperlink.org)
+access point into Gladys, through the local API of the access point (HTTP and
+websocket, no cloud), and shows texts on them from your scenes.
+
+> **Never tested with a real device.** This integration was written from the
+> Home Assistant integration of the project and the firmware source of the
+> access point, and tested against a simulated access point only. Unofficial,
+> not affiliated with the OpenEPaperLink project.
 
 ## What you get
 
-Six demo devices show up after installation: a weather station (real data
-from Open-Meteo), a switch, a dimmable light, a smart plug with power
-metering, a motion sensor and a camera.
+- **The access point**: reachable or not, the state of its radio, the number
+  of tags with a low battery and of tags overdue (as the access point counts
+  them).
+- **One device per tag** (keyed by its MAC address): battery level (estimated
+  from the voltage: 2.2 V is 0 %, 2.6 V and above 100 %), the temperature of
+  the tag chip, "reachable" (the tag checked in on time) and its last contact
+  (UTC). A tag served by another access point has no battery value.
+- **Scene action "Show a text on an e-paper tag"**: pick the tag, type the
+  text (scene variables work), and optionally the colour, the background, the
+  size and the alignment. Read only devices: nothing else can be commanded.
 
-## Configuration
+## Setup
 
-1. Open the **Configuration** tab of the integration.
-2. Set the **latitude** and **longitude** the demo weather station should
-   observe (they default to Paris), and pick your temperature unit.
-   The **refresh interval** sets how often the weather station and the
-   plug's power are read: every 5 minutes by default, every minute at most.
-3. Save: the devices appear in the **Discovery** tab, ready to be added.
+1. Your OpenEPaperLink access point runs and its web page opens in a browser
+   (for example `http://192.168.1.30`). Give it a fixed address in your router
+   if you can.
+2. In Gladys, open this integration and type that address (no `https://`:
+   the access point speaks plain HTTP). It has no password.
+3. Save. The access point and its tags appear in the Discovery tab: create
+   the ones you want.
 
-The **Prefer the local connection** toggle drives the demo plug: it reports
-the channel it actually uses as a badge (local or cloud), with an orange dot
-when it runs degraded (local refused, cloud fallback).
+## Showing a text
 
-## Actions
+- Up to 280 characters; line breaks are kept. The text is drawn as large as it
+  fits on the display (or small, medium, large), centred or left aligned.
+- The font draws the ASCII characters and the French accents of lower case
+  letters (é, è, à, ç…); an accented capital is drawn without its accent, and
+  any other character (an emoji…) shows as "?".
+- Red and yellow only on displays that have them (the action says so
+  otherwise).
+- The access point stores the image; **the tag shows it at its next
+  check-in** (often within a minute, longer for a tag that sleeps more). The
+  output "Taken by the access point" is true when the access point accepted
+  it.
 
-- **Test the weather provider** — performs a live request to Open-Meteo and
-  shows the current temperature and humidity under the button.
-- **Identify a device** — pick one of your devices in the list and it will
-  signal itself (the demo light "blinks" in the logs).
+### Never a burst
 
-## Scenes
+- One upload at a time, at least 2 seconds apart, and at least 15 seconds
+  apart for the same tag.
+- A newer text for a tag replaces the one still waiting for it (the older one
+  ends with "replaced").
+- At most 10 texts wait; a text that could not leave within the 25 seconds of
+  the action is dropped, never sent late.
+- "Busy" (409) from the access point: the next uploads wait what it asked
+  (5 seconds to 5 minutes). 429 or 5xx: everything pauses (1 minute to 6
+  hours), across restarts too.
+- If the access point does not answer an upload in time, the action says
+  "sent, without confirmation": the tag may still show the text.
 
-The integration adds its own cards to the scene editor (Gladys 5.1 or
-later), under the **Integrations** category:
+## How it reads
 
-- **Motion detected** (trigger) — starts the scene when a demo motion sensor
-  sees something move. Optionally pick the sensor and what moved (person,
-  animal); left empty, any detection matches. The following actions can
-  read what moved with `{{triggerEvent.data.target}}`.
-- **Identify a device** (action) — makes the chosen device signal itself.
-  It returns whether the device could signal itself, so the following
-  actions can depend on it.
+- The tag list (`/get_db`) when connecting, at most every 15 minutes; then
+  the websocket (`/ws`) brings every tag check-in and the state of the access
+  point as they happen.
+- A dropped connection is tried again after 10 s, 30 s, 1, 2, then 5 minutes;
+  never two attempts closer than 10 seconds, even when the container restarts.
+  "Reconnect" right after an attempt does nothing more.
+- Values go to Gladys in groups, at most 240 per minute; an unchanged value
+  is not sent again (battery and temperature are, every 30 minutes, for the
+  history).
 
-## Dashboard
+## Questions for testers
 
-Add the **Demo status** widget to a dashboard: it shows the live
-temperature of the weather station and the power of the office plug, the
-connection the plug currently uses (orange when degraded) and the observed
-location. Its **Identify the light** button makes the demo light signal
-itself.
+If you own an access point, please tell us (forum, or an issue on GitHub):
+does the tag show the text with the right size and colours? How long until it
+shows? Do the battery level and the temperature match the web page of the
+access point?
 
-## Troubleshooting
+## Data and privacy
 
-The integration logs everything it does: check the integration logs from the
-Gladys UI (or `docker logs` on the host) with `LOG_LEVEL=debug` for the full
-detail.
+Nothing leaves your network. The integration keeps in its `/data` volume only
+the tag list (MAC, name, type), the end of a pause and the time of the last
+connection attempt.

@@ -1,67 +1,92 @@
-# Template de démonstration
+# OpenEPaperLink
 
-Ceci est la documentation utilisateur de l'intégration. Gladys ré-héberge ce
-fichier et affiche un lien **Documentation** permanent vers lui dans l'écran
-de configuration (dans la langue de l'utilisateur, avec l'anglais en repli) —
-c'est au moment de configurer que l'utilisateur en a le plus besoin. Gardez
-les courtes indications d'accueil dans les blocs `section` du `config_schema`
-du manifest ; mettez ici le pas-à-pas détaillé (captures d'écran, dépannage…).
+Amène dans Gladys les étiquettes e-paper d'un point d'accès
+[OpenEPaperLink](https://openepaperlink.org), par l'API locale du point
+d'accès (HTTP et websocket, sans cloud), et y affiche des textes depuis vos
+scènes.
+
+> **Jamais testé avec un vrai appareil.** Cette intégration a été écrite à
+> partir de l'intégration Home Assistant du projet et du code source du
+> firmware du point d'accès, et testée seulement contre un point d'accès
+> simulé. Non officielle, sans lien avec le projet OpenEPaperLink.
 
 ## Ce que vous obtenez
 
-Six appareils de démonstration apparaissent après l'installation : une
-station météo (vraies données Open-Meteo), un interrupteur, une lampe
-variable, une prise connectée avec mesure de puissance, un détecteur de
-mouvement et une caméra.
+- **Le point d'accès** : joignable ou non, l'état de sa radio, le nombre
+  d'étiquettes à batterie faible et d'étiquettes en retard (comptées par le
+  point d'accès).
+- **Un appareil par étiquette** (identifié par son adresse MAC) : niveau de
+  batterie (estimé d'après la tension : 2,2 V vaut 0 %, 2,6 V et plus 100 %),
+  la température de la puce de l'étiquette, « joignable » (l'étiquette s'est
+  signalée à l'heure) et son dernier contact (UTC). Une étiquette servie par
+  un autre point d'accès n'a pas de valeur de batterie.
+- **Action de scène « Afficher un texte sur une étiquette e-paper »** :
+  choisissez l'étiquette, tapez le texte (les variables de scène marchent),
+  et si vous voulez la couleur, le fond, la taille et l'alignement. Appareils
+  en lecture seule : rien d'autre ne peut être commandé.
 
-## Configuration
+## Mise en route
 
-1. Ouvrez l'onglet **Configuration** de l'intégration.
-2. Renseignez la **latitude** et la **longitude** que la station météo de
-   démonstration doit observer (Paris par défaut), et choisissez votre unité
-   de température. L'**intervalle de rafraîchissement** règle la fréquence
-   de lecture de la station météo et de la puissance de la prise : toutes
-   les 5 minutes par défaut, toutes les minutes au plus.
-3. Enregistrez : les appareils apparaissent dans l'onglet **Découverte**,
-   prêts à être ajoutés.
+1. Votre point d'accès OpenEPaperLink fonctionne et sa page web s'ouvre dans
+   un navigateur (par exemple `http://192.168.1.30`). Donnez-lui une adresse
+   fixe dans votre box si possible.
+2. Dans Gladys, ouvrez cette intégration et saisissez cette adresse (sans
+   `https://` : le point d'accès parle en HTTP simple). Il n'a pas de mot de
+   passe.
+3. Enregistrez. Le point d'accès et ses étiquettes apparaissent dans l'onglet
+   Découverte : créez ceux que vous voulez.
 
-Le réglage **Préférer la connexion locale** pilote la prise de
-démonstration : elle affiche en badge le canal réellement utilisé (local ou
-cloud), avec un point orange quand elle fonctionne en mode dégradé (local
-refusé, bascule cloud).
+## Afficher un texte
 
-## Actions
+- 280 caractères au plus ; les retours à la ligne sont gardés. Le texte est
+  dessiné aussi grand que l'écran le permet (ou petit, moyen, grand), centré
+  ou à gauche.
+- La police dessine les caractères ASCII et les accents français des
+  minuscules (é, è, à, ç…) ; une majuscule accentuée est dessinée sans son
+  accent, et tout autre caractère (un émoji…) s'affiche « ? ».
+- Rouge et jaune seulement sur les écrans qui les ont (l'action le dit
+  sinon).
+- Le point d'accès garde l'image ; **l'étiquette l'affiche à son prochain
+  contact** (souvent en moins d'une minute, plus pour une étiquette qui dort
+  davantage). La sortie « Pris par le point d'accès » vaut vrai quand le point
+  d'accès l'a acceptée.
 
-- **Tester le fournisseur météo** — effectue une requête en direct vers
-  Open-Meteo et affiche la température et l'humidité actuelles sous le
-  bouton.
-- **Identifier un appareil** — choisissez un de vos appareils dans la liste
-  et il se signale (la lampe de démonstration « clignote » dans les logs).
+### Jamais en rafale
 
-## Scènes
+- Un envoi à la fois, espacés d'au moins 2 secondes, et d'au moins 15
+  secondes pour la même étiquette.
+- Un texte plus récent pour une étiquette remplace celui qui l'attend encore
+  (l'ancien se termine par « remplacé »).
+- 10 textes au plus en attente ; un texte qui ne pourrait pas partir dans les
+  25 secondes de l'action est abandonné, jamais envoyé en retard.
+- « Occupé » (409) du point d'accès : les envois suivants attendent ce qu'il
+  demande (5 secondes à 5 minutes). 429 ou 5xx : tout se met en pause (1
+  minute à 6 heures), même après un redémarrage.
+- Si le point d'accès ne répond pas à temps à un envoi, l'action dit
+  « envoyé, sans confirmation » : l'étiquette peut quand même afficher le
+  texte.
 
-L'intégration ajoute ses propres cartes à l'éditeur de scènes (Gladys 5.1
-ou plus récent), dans la catégorie **Intégrations** :
+## Comment il lit
 
-- **Mouvement détecté** (déclencheur) — lance la scène quand un détecteur
-  de démonstration voit bouger quelque chose. Choisissez éventuellement le
-  détecteur et ce qui a bougé (personne, animal) ; laissés vides, toute
-  détection correspond. Les actions suivantes peuvent lire ce qui a bougé
-  avec `{{triggerEvent.data.target}}`.
-- **Identifier un appareil** (action) — fait se signaler l'appareil choisi.
-  Elle indique si l'appareil a pu se signaler, pour que les actions
-  suivantes puissent en dépendre.
+- La liste des étiquettes (`/get_db`) à la connexion, au plus toutes les 15
+  minutes ; ensuite le websocket (`/ws`) apporte chaque contact d'étiquette
+  et l'état du point d'accès au fil de l'eau.
+- Une connexion perdue est retentée après 10 s, 30 s, 1, 2, puis 5 minutes ;
+  jamais deux essais à moins de 10 secondes, même quand le conteneur
+  redémarre. « Se reconnecter » juste après un essai ne fait rien de plus.
+- Les valeurs partent vers Gladys par groupes, 240 par minute au plus ; une
+  valeur inchangée n'est pas renvoyée (batterie et température le sont, toutes
+  les 30 minutes, pour l'historique).
 
-## Tableau de bord
+## Questions aux testeurs
 
-Ajoutez le widget **État de la démo** à un tableau de bord : il affiche en
-direct la température de la station météo et la puissance de la prise du
-bureau, la connexion utilisée par la prise (en orange si dégradée) et la
-position observée. Son bouton **Identifier la lampe** fait se signaler la
-lampe de démonstration.
+Si vous avez un point d'accès, dites-nous (forum, ou un ticket sur GitHub) :
+l'étiquette affiche-t-elle le texte avec la bonne taille et les bonnes
+couleurs ? Au bout de combien de temps ? Le niveau de batterie et la
+température correspondent-ils à la page web du point d'accès ?
 
-## Dépannage
+## Données et vie privée
 
-L'intégration journalise tout ce qu'elle fait : consultez les logs de
-l'intégration depuis l'interface Gladys (ou `docker logs` sur l'hôte) avec
-`LOG_LEVEL=debug` pour le détail complet.
+Rien ne sort de votre réseau. L'intégration ne garde dans son volume `/data`
+que la liste des étiquettes (MAC, nom, type), la fin d'une pause et l'heure
+du dernier essai de connexion.

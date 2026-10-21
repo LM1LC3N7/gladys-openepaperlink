@@ -12,44 +12,29 @@ the notes of the version's GitHub Release.
 
 ### Added
 
-- A working example of scene triggers, scene actions and dashboard widgets
-  (Gladys 5.1.0 or later).
-- `CHANGELOG.md`, rolled by the Release workflow.
-- A GitHub Release for every version, with its changelog section as notes: the
-  Gladys Supervision page links each version to the repository's releases.
-- CI runs the tests on Node 22 and 24, and builds the Docker image.
-- Dependabot keeps the npm dependencies and the GitHub Actions up to date.
-- `SECURITY.md` (how to report a vulnerability) and `CLAUDE.md` (project rules
-  for contributors and coding assistants).
-- Manifest tests: `version` matches `package.json`, `docker_image` is tagged
-  with it, descriptions hold 10 to 100 characters, placeholders are
-  multi-language objects.
-- The latitude and longitude fields show an example value as placeholder.
+- OpenEPaperLink access point, through its local HTTP API and websocket: the
+  tag list (`/get_db`) when connecting and at most every 15 minutes, then the
+  check-ins and the access point state live (`/ws`). A JavaScript port of the
+  OpenEPaperLink Home Assistant integration (Apache-2.0). No cloud.
+- One device for the access point (reachable, radio state, tags with a low
+  battery, tags overdue) and one per tag, keyed by its MAC address (battery,
+  chip temperature, reachable, last contact). Read only: no switch, no
+  command.
+- Scene action "Show a text on an e-paper tag": the text (280 characters at
+  most, cleaned) drawn as large as it fits with a 5x9 font made for this
+  integration, encoded as a JPEG of the display size (no dependency, 512 KB
+  at most), sent to `/imgupload` after checking that the access point knows
+  the tag. Colour, background, size and alignment options.
+- Never a burst toward the access point: one upload at a time, 2 s apart (15 s
+  for the same tag), a newer text for a tag replacing the waiting one, at most
+  10 waiting, nothing sent after the 25 s of the action; "busy" (409) and
+  429/5xx pauses, the latter kept across restarts.
+- A websocket client with its own bounds (64 KB per message, linear parsing,
+  handshake checked, ping and idle timeout); reconnection after 10 s to 5 min,
+  never two attempts closer than 10 s, restarts of the container included.
+- States sent in groups within a budget of 240 per minute; status and
+  Discovery published again at every connection to Gladys; a device
+  published again keeps every feature of the created one.
+- `LICENSE` (Apache-2.0) and `THIRD_PARTY_NOTICES.md`, copied into the image.
 
-### Changed
-
-- Node.js 22 or later is required (Node 20 is end-of-life).
-- Integration SDK 0.15.0. The tests now run against the fake Gladys of the
-  SDK, which refuses the payloads Gladys refuses.
-- The refresh interval is one minute minimum, the fastest Gladys polls a
-  device. The plug's power is only sent when it changes, and every 30
-  minutes otherwise.
-
-### Fixed
-
-- Gladys refused the devices of the Discovery tab: the weather station and
-  the plug declared their poll frequency in seconds instead of one of the
-  values Gladys accepts, and were never polled. They now poll every minute,
-  and the readings follow the refresh interval of the configuration.
-
-- The release commit no longer fails `npm run format:check`: the Release
-  workflow updates the manifest `version` and `docker_image` in place instead
-  of re-printing the whole file with `jq`.
-- The integration can write to `/data`: the image creates the directory owned
-  by the `node` user, a new Docker volume was owned by root.
-- A sub-container running the integration's own image follows it to the new
-  tag at each release, as well as in the manifest of the build summary: it kept
-  the previous tag, which may not exist on the registry. Sub-containers on a
-  third-party image (a broker, a database...) keep theirs.
-
-[Unreleased]: https://github.com/GladysAssistant/integration-template-js/commits/main
+[Unreleased]: https://github.com/LM1LC3N7/gladys-openepaperlink/commits/main

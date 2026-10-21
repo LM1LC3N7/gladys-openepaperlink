@@ -1,177 +1,210 @@
 {
   "manifest_version": 1,
   "type": "device",
-  "name": "Demo Devices Template",
+  "name": "OpenEPaperLink",
   "description": {
-    "en": "Starter template showing sensors, a switch, a dimmable light and a smart plug.",
-    "fr": "Template de démarrage : capteurs, interrupteur, lampe variable et prise connectée."
+    "en": "OpenEPaperLink e-paper tags: battery, temperature, last contact, and texts shown from scenes.",
+    "fr": "Étiquettes e-paper OpenEPaperLink : batterie, température, dernier contact, textes des scènes."
   },
-  "version": "1.0.0",
-  "docker_image": "ghcr.io/gladysassistant/integration-template-js:1.0.0",
+  "version": "0.1.0",
+  "docker_image": "ghcr.io/lm1lc3n7/gladys-openepaperlink:0.1.0",
   "gladys_version": ">=5.1.0",
-  "cover_image": "https://raw.githubusercontent.com/GladysAssistant/integration-template-js/master/cover.png",
-  "categories": ["lighting", "security", "environment"],
-  "transports": ["local", "cloud"],
+  "cover_image": "https://raw.githubusercontent.com/LM1LC3N7/gladys-openepaperlink/main/cover.png",
+  "categories": ["multimedia"],
+  "transports": ["local"],
   "config_schema": [
     {
       "key": "intro",
       "type": "section",
-      "label": { "en": "Getting started", "fr": "Pour commencer" },
+      "label": {
+        "en": "Your OpenEPaperLink access point",
+        "fr": "Votre point d'accès OpenEPaperLink"
+      },
       "description": {
-        "en": "The demo weather station reads real data from the free Open-Meteo API: pick the coordinates to observe. No account, no API key.",
-        "fr": "La station météo de démonstration lit de vraies données via l'API gratuite Open-Meteo : choisissez les coordonnées à observer. Pas de compte, pas de clé d'API."
+        "en": "Brings the e-paper tags of an OpenEPaperLink access point into Gladys, through the local API of the access point (no cloud): for each tag its battery, its temperature, whether it checks in on time and its last contact, and the state of the access point. A scene action shows a text on a tag (drawn by the integration, sent to the access point, displayed by the tag at its next check-in). The access point has no password. Never tested with a real device. Unofficial, not affiliated with the OpenEPaperLink project.",
+        "fr": "Amène dans Gladys les étiquettes e-paper d'un point d'accès OpenEPaperLink, par l'API locale du point d'accès (sans cloud) : pour chaque étiquette sa batterie, sa température, si elle se signale à l'heure et son dernier contact, et l'état du point d'accès. Une action de scène affiche un texte sur une étiquette (dessiné par l'intégration, envoyé au point d'accès, affiché par l'étiquette à son prochain contact). Le point d'accès n'a pas de mot de passe. Jamais testé avec un vrai appareil. Non officiel, sans lien avec le projet OpenEPaperLink."
       },
       "links": [
         {
-          "url": "https://open-meteo.com/en/docs",
-          "label": { "en": "Open-Meteo documentation", "fr": "Documentation Open-Meteo" }
+          "url": "https://github.com/LM1LC3N7/gladys-openepaperlink/blob/main/docs/fr.md",
+          "label": {
+            "en": "Guide (French)",
+            "fr": "Guide (français)"
+          }
+        },
+        {
+          "url": "https://github.com/LM1LC3N7/gladys-openepaperlink/blob/main/docs/en.md",
+          "label": {
+            "en": "Guide (English)",
+            "fr": "Guide (anglais)"
+          }
         }
       ]
     },
     {
-      "key": "latitude",
-      "type": "number",
-      "label": { "en": "Latitude", "fr": "Latitude" },
-      "description": {
-        "en": "Latitude used for the demo weather sensor.",
-        "fr": "Latitude utilisée par le capteur météo de démonstration."
+      "key": "host",
+      "type": "string",
+      "label": {
+        "en": "Address of the access point",
+        "fr": "Adresse du point d'accès"
       },
-      "placeholder": { "en": "e.g. 48.8566", "fr": "ex. 48.8566" },
-      "required": true,
-      "default": 48.8566,
-      "min": -90,
-      "max": 90
+      "description": {
+        "en": "Its IP address or host name on your network, the one you open its web page with. A port may follow (192.168.1.30:8080). Plain HTTP: no https://.",
+        "fr": "Son adresse IP ou son nom sur votre réseau, celle qui ouvre sa page web. Un port peut suivre (192.168.1.30:8080). HTTP simple : pas de https://."
+      },
+      "placeholder": {
+        "en": "192.168.1.30",
+        "fr": "192.168.1.30"
+      },
+      "required": true
     },
     {
-      "key": "longitude",
-      "type": "number",
-      "label": { "en": "Longitude", "fr": "Longitude" },
-      "description": {
-        "en": "Longitude used for the demo weather sensor.",
-        "fr": "Longitude utilisée par le capteur météo de démonstration."
-      },
-      "placeholder": { "en": "e.g. 2.3522", "fr": "ex. 2.3522" },
-      "required": true,
-      "default": 2.3522,
-      "min": -180,
-      "max": 180
-    },
-    {
-      "key": "unit",
+      "key": "language",
       "type": "select",
-      "label": { "en": "Temperature unit", "fr": "Unité de température" },
-      "required": false,
-      "default": "celsius",
-      "options": [
-        { "value": "celsius", "label": { "en": "Celsius", "fr": "Celsius" } },
-        { "value": "fahrenheit", "label": { "en": "Fahrenheit", "fr": "Fahrenheit" } }
-      ]
-    },
-    {
-      "key": "poll_frequency",
-      "type": "number",
-      "label": { "en": "Refresh interval (s)", "fr": "Intervalle de rafraîchissement (s)" },
+      "label": {
+        "en": "Language of the names",
+        "fr": "Langue des noms"
+      },
       "description": {
-        "en": "How often sensors are polled, in seconds (one minute minimum).",
-        "fr": "Fréquence d'interrogation des capteurs, en secondes (une minute minimum)."
+        "en": "Used for the names of the features added from now on, and for the radio state of the access point.",
+        "fr": "Sert aux noms des fonctionnalités ajoutées désormais, et à l'état de la radio du point d'accès."
       },
       "required": false,
-      "default": 300,
-      "min": 60,
-      "max": 3600
+      "default": "fr",
+      "options": [
+        {
+          "value": "fr",
+          "label": {
+            "en": "French",
+            "fr": "Français"
+          }
+        },
+        {
+          "value": "en",
+          "label": {
+            "en": "English",
+            "fr": "Anglais"
+          }
+        }
+      ]
     }
   ],
   "actions": [
     {
-      "key": "test_weather",
-      "label": { "en": "Test the weather provider", "fr": "Tester le fournisseur météo" },
-      "timeout_seconds": 30
-    },
-    {
-      "key": "identify",
-      "label": { "en": "Identify a device", "fr": "Identifier un appareil" },
-      "fields": [
-        {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Device", "fr": "Appareil" },
-          "required": true
-        }
-      ]
-    }
-  ],
-  "scene_triggers": [
-    {
-      "key": "motion_detected",
-      "label": { "en": "Motion detected", "fr": "Mouvement détecté" },
-      "description": {
-        "en": "A demo motion sensor saw a person or an animal move.",
-        "fr": "Un détecteur de démonstration a vu bouger une personne ou un animal."
+      "key": "reconnect",
+      "label": {
+        "en": "Reconnect",
+        "fr": "Se reconnecter"
       },
-      "fields": [
-        {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Sensor", "fr": "Détecteur" }
-        },
-        {
-          "key": "target",
-          "type": "multi_select",
-          "label": { "en": "What moved", "fr": "Ce qui a bougé" },
-          "options": [
-            { "value": "person", "label": { "en": "Person", "fr": "Personne" } },
-            { "value": "animal", "label": { "en": "Animal", "fr": "Animal" } }
-          ]
-        }
-      ],
-      "variables": [
-        {
-          "key": "target",
-          "type": "string",
-          "label": { "en": "What moved", "fr": "Ce qui a bougé" }
-        }
-      ]
+      "timeout_seconds": 30
     }
   ],
   "scene_actions": [
     {
-      "key": "identify_device",
-      "label": { "en": "Identify a device", "fr": "Identifier un appareil" },
-      "description": {
-        "en": "Make a device signal itself (the demo light blinks).",
-        "fr": "Fait se signaler un appareil (la lampe de démonstration clignote)."
+      "key": "show_text",
+      "label": {
+        "en": "Show a text on an e-paper tag",
+        "fr": "Afficher un texte sur une étiquette e-paper"
       },
-      "timeout_seconds": 15,
+      "description": {
+        "en": "Draws the text (up to 280 characters, line breaks kept) as large as it fits and sends it to the access point; the tag shows it at its next check-in. Texts are sent one at a time and spaced: a newer text for the same tag replaces the one still waiting.",
+        "fr": "Dessine le texte (280 caractères au plus, retours à la ligne gardés) aussi grand que possible et l'envoie au point d'accès ; l'étiquette l'affiche à son prochain contact. Les textes partent un par un, espacés : un texte plus récent pour la même étiquette remplace celui qui attend encore."
+      },
+      "timeout_seconds": 30,
       "fields": [
         {
-          "key": "device",
+          "key": "tag",
           "type": "select",
           "source": "devices",
-          "label": { "en": "Device", "fr": "Appareil" },
+          "label": {
+            "en": "Tag",
+            "fr": "Étiquette"
+          },
           "required": true
+        },
+        {
+          "key": "text",
+          "type": "string",
+          "label": {
+            "en": "Text",
+            "fr": "Texte"
+          },
+          "required": true
+        },
+        {
+          "key": "color",
+          "type": "select",
+          "label": {
+            "en": "Text colour (red and yellow on displays that have them)",
+            "fr": "Couleur du texte (rouge et jaune sur les écrans qui les ont)"
+          },
+          "required": false,
+          "default": "black",
+          "options": [
+            { "value": "black", "label": { "en": "Black", "fr": "Noir" } },
+            { "value": "red", "label": { "en": "Red", "fr": "Rouge" } },
+            { "value": "yellow", "label": { "en": "Yellow", "fr": "Jaune" } },
+            { "value": "white", "label": { "en": "White", "fr": "Blanc" } }
+          ]
+        },
+        {
+          "key": "background",
+          "type": "select",
+          "label": {
+            "en": "Background",
+            "fr": "Fond"
+          },
+          "required": false,
+          "default": "white",
+          "options": [
+            { "value": "white", "label": { "en": "White", "fr": "Blanc" } },
+            { "value": "black", "label": { "en": "Black", "fr": "Noir" } }
+          ]
+        },
+        {
+          "key": "size",
+          "type": "select",
+          "label": {
+            "en": "Text size",
+            "fr": "Taille du texte"
+          },
+          "required": false,
+          "default": "auto",
+          "options": [
+            {
+              "value": "auto",
+              "label": { "en": "As large as it fits", "fr": "Aussi grand que possible" }
+            },
+            { "value": "small", "label": { "en": "Small", "fr": "Petit" } },
+            { "value": "medium", "label": { "en": "Medium", "fr": "Moyen" } },
+            { "value": "large", "label": { "en": "Large", "fr": "Grand" } }
+          ]
+        },
+        {
+          "key": "align",
+          "type": "select",
+          "label": {
+            "en": "Alignment",
+            "fr": "Alignement"
+          },
+          "required": false,
+          "default": "center",
+          "options": [
+            { "value": "center", "label": { "en": "Centred", "fr": "Centré" } },
+            { "value": "left", "label": { "en": "Left", "fr": "À gauche" } }
+          ]
         }
       ],
       "outputs": [
         {
-          "key": "signalled",
+          "key": "accepted",
           "type": "boolean",
-          "label": { "en": "Device signalled", "fr": "Appareil signalé" }
+          "label": {
+            "en": "Taken by the access point",
+            "fr": "Pris par le point d'accès"
+          }
         }
       ]
-    }
-  ],
-  "widgets": [
-    {
-      "key": "demo_status",
-      "label": { "en": "Demo status", "fr": "État de la démo" },
-      "description": {
-        "en": "Live temperature and plug power, plug connection and observed location.",
-        "fr": "Température et puissance en direct, connexion de la prise, position observée."
-      },
-      "icon": "activity",
-      "action_timeout_seconds": 15
     }
   ]
 }
