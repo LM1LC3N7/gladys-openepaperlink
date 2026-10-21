@@ -137,5 +137,41 @@ up to date at the end of every milestone.
   every minute while connected.
 - Every publication of a device starts from the device created in Gladys
   (`gladys.devices`) and adds back its features: nothing is ever lost.
+
+### Review fixes (2026-10-21, review 1)
+
+- I1: the bytes that come with the 101 answer reach the frame parser at the
+  next turn, once the app attached the client (a `sys` there is no longer
+  lost); a client already closed after `await open()` (a close frame right
+  after the 101) is a failed attempt, reconnected after the backoff.
+- I2: the three guards of gladys-system-bridge: 100 pings in a row at most,
+  closed when more than 64 KB wait to be written (pongs and every send), one
+  pong waiting at most.
+- I3: the 8 KB bound covers the handshake headers only, read into one fixed
+  buffer (no concatenation per chunk); what follows goes to the parser.
+- M1: a frame or a message unfinished 30 s after its first byte closes the
+  websocket (a byte now and then no longer keeps it open).
+- M2: a tag added or renamed on the websocket republishes the Discovery at
+  most every 5 s (named timer); start, scan and `connected` still force it.
+- M3: the generation is checked after `await publishDevices()` of the tag
+  list and right before the websocket is created.
+- M4: the last tag list reading (time and address) is kept in `/data`: a
+  restart or "Reconnect" reads it again only after 15 minutes, a new address
+  at once.
+- M5: leading blanks are skipped before the 280-character budget, spaces
+  merged, at most one empty line in a row.
+- M6: a display where not one character fits refuses the text ("too
+  small"), never `accepted: true` for an empty image.
+- M7: the handshake must carry `Upgrade: websocket` and `Connection: Upgrade`;
+  an extension or a subprotocol is refused; text is strict UTF-8; a close
+  frame of one byte is a protocol error.
+- M8: a 5xx of `/tagtypes` or `/imgupload` only holds the uploads
+  (Retry-After, else 5 min, bounded 5 s to 5 min); the websocket and
+  `get_db` go on. A 5xx of the tag check (`get_db`) or of the tag list, and
+  any 429, still pause everything.
+- M9 (not changed): drawing and encoding the largest display allowed
+  (2000 x 1000, three qualities) blocks the event loop about 0.5 s, bounded;
+  lower `LIMITS.displayPixels` if it ever matters.
+
 - No control byte in any text file, no BOM, no mojibake (tests); no secret
   anywhere, and the docs never claim any protection of stored data (test).

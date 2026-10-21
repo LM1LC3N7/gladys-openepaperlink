@@ -48,22 +48,44 @@ export function cleanDisplayText(value) {
   if (typeof value !== 'string' && typeof value !== 'number') {
     return '';
   }
-  // Bounded before any work: a huge value costs no more than a long one.
-  const raw = String(value).slice(0, LIMITS.textChars * 4);
+  const all = String(value);
+  // Leading blanks never count; then bounded before any work: a huge value
+  // costs no more than a long one.
+  const start = all.search(/\S/);
+  if (start < 0) {
+    return '';
+  }
+  const raw = all.slice(start, start + LIMITS.textChars * 4);
   const normalized = raw
     .replace(/\r\n?/g, '\n')
     .replace(INVISIBLE, '')
     .replace(CONTROL, ' ')
     .normalize('NFC');
   let out = '';
+  // Blanks are merged as they come: no space at the start of a line, no run
+  // of spaces, at most one empty line in a row, so they never eat the budget.
+  const add = (piece) => {
+    for (const c of piece) {
+      if (c === ' ' && (out === '' || out.endsWith(' ') || out.endsWith('\n'))) {
+        continue;
+      }
+      if (c === '\n' && (out === '' || out.endsWith('\n\n'))) {
+        continue;
+      }
+      if (c === '\n' && out.endsWith(' ')) {
+        out = out.slice(0, -1);
+      }
+      out += c;
+    }
+  };
   for (const char of normalized) {
     if (char === '\n' || GLYPHS.has(char)) {
-      out += char;
+      add(char);
     } else if (REPLACE.has(char)) {
-      out += REPLACE.get(char);
+      add(REPLACE.get(char));
     } else {
-      const base = char.normalize('NFD').replace(/[̀-ͯ]/g, '');
-      out += base.length > 0 && [...base].every((c) => GLYPHS.has(c)) ? base : '?';
+      const base = char.normalize('NFD').replace(/[\u{300}-\u{36f}]/gu, '');
+      add(base.length > 0 && [...base].every((c) => GLYPHS.has(c)) ? base : '?');
     }
     if (out.length >= LIMITS.textChars) {
       break;
@@ -75,9 +97,6 @@ export function cleanDisplayText(value) {
     .map((l) => l.trim());
   while (lines.length && lines[lines.length - 1] === '') {
     lines.pop();
-  }
-  while (lines.length && lines[0] === '') {
-    lines.shift();
   }
   return lines.slice(0, LIMITS.textLines).join('\n');
 }

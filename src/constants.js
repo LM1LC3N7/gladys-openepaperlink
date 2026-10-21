@@ -76,6 +76,8 @@ export const TIMINGS = Object.freeze({
   /** A ping on the websocket every this; no byte for `idleTimeout` closes it. */
   pingInterval: 30_000,
   idleTimeout: 90_000,
+  /** A websocket frame or message must complete within this from its first byte. */
+  frameTimeout: 30_000,
   /** Reconnection delays of the websocket (by attempt, the last one repeating). */
   reconnect: [10_000, 30_000, 60_000, 120_000, 300_000],
   /** A connection held this long resets the reconnection delays. */
@@ -84,7 +86,9 @@ export const TIMINGS = Object.freeze({
   attemptSpacing: 10_000,
   /** The time of the last attempt is written to /data at most this often. */
   attemptWrite: 60_000,
-  /** The whole tag list (`get_db`) is read at most this often. */
+  /** A tag renamed or added on the websocket republishes the Discovery at most this often. */
+  discoveryDelay: 5_000,
+  /** The whole tag list (`get_db`) is read at most this often (kept in /data). */
   resync: 15 * 60_000,
   /** The scene action: the whole job (queue included) must start before this. */
   sceneBudget: 25_000,
@@ -126,8 +130,12 @@ export const LIMITS = Object.freeze({
   wsMessageBytes: 64 * 1024,
   /** Fragments of one websocket message at most. */
   wsFragments: 32,
-  /** Largest handshake answer. */
+  /** Largest headers of the handshake answer. */
   wsHandshakeBytes: 8 * 1024,
+  /** Pings in a row at most (a flood is closed). */
+  wsPingsInARow: 100,
+  /** Bytes left unread by the access point before the websocket is closed. */
+  wsPendingWrite: 64 * 1024,
   /** Characters of the text to show (after cleaning). */
   textChars: 280,
   /** Lines of the text to show. */

@@ -90,7 +90,6 @@ export class OeplApp {
     this.nextAt = undefined;
     this.failures = 0;
     this.connectedAt = undefined;
-    this.lastResyncAt = undefined;
     this.lastAttemptWrite = -Infinity;
     /** The connection in flight: { generation, promise }. */
     this.connecting = undefined;
@@ -280,7 +279,6 @@ export class OeplApp {
     this.activeFingerprint = this.config.fingerprint;
     this.lastError = undefined;
     this.failures = 0;
-    this.lastResyncAt = undefined;
     this.view = { online: undefined, sys: undefined };
     if (!this.config.ready) {
       this.phase = this.config.invalidHost ? 'invalid' : 'missing';
@@ -350,15 +348,15 @@ export class OeplApp {
     }
     this.recordAttempt();
     try {
-      if (
-        this.lastResyncAt === undefined ||
-        this.now() - this.lastResyncAt >= this.timings.resync
-      ) {
+      if (this.resyncDue()) {
         const tags = await this.api.tags(() => this.alive(generation));
         this.alive(generation);
-        this.lastResyncAt = this.now();
-        await this.keepTags(tags);
+        // Kept in /data: a restart or "Reconnect" does not read the list again sooner.
+        this.data.resync = { at: this.now(), fingerprint: this.config.fingerprint };
+        this.saveNow();
+        await this.keepTags(tags, generation);
       }
+      this.alive(generation);
       const client = new WsClient({
         host: this.config.wsHost,
         port: this.config.wsPort,
@@ -383,6 +381,12 @@ export class OeplApp {
         return;
       }
       this.ws = client;
+      if (client.closed) {
+        // Closed in the handshake turn (a close frame right after the 101):
+        // a failed attempt, the next one after the backoff.
+        this.ws = undefined;
+        throw new ApError(KINDS.NO_ANSWER, 'Websocket closed right after the handshake');
+      }
       this.connectedAt = this.now();
       if (this.phase !== 'ready') {
         this.logger.info('Connected to the access point');
@@ -399,6 +403,16 @@ export class OeplApp {
       this.failed(err);
     }
     await this.updateStatus();
+  }
+
+  /** Whether the tag list must be read: never read for this address, or 15 minutes ago. */
+  resyncDue() {
+    const resync = this.data.resync;
+    return (
+      !resync ||
+      resync.fingerprint !== this.config.fingerprint ||
+      this.now() - resync.at >= this.timings.resync
+    );
   }
 
   /** A failed attempt: the next one after the backoff (or the pause). */
@@ -460,7 +474,7 @@ export class OeplApp {
       };
       this.queueApStates();
     } else if (parsed.type === 'tag') {
-      this.background(() => this.updateTag(parsed.tag));
+      this.updateTag(parsed.tag);
     } else if (parsed.type === 'rebooting') {
       this.logger.info('The access point is rebooting');
       this.ws?.close();
@@ -480,7 +494,7 @@ export class OeplApp {
   // --- Tags --------------------------------------------------------------------------
 
   /** The whole list read over HTTP: kept, published once. */
-  async keepTags(tags) {
+  async keepTags(tags, generation = this.generation) {
     let changed = false;
     for (const tag of tags) {
       changed = this.remember(tag) || changed;
@@ -488,19 +502,28 @@ export class OeplApp {
     if (changed) {
       this.persist();
       await this.publishDevices();
+      this.alive(generation);
     }
     for (const tag of tags) {
       this.queueTagStates(tag);
     }
   }
 
-  /** One check-in from the websocket. */
-  async updateTag(tag) {
+  /** One check-in from the websocket; a new tag or name republishes the Discovery, grouped. */
+  updateTag(tag) {
     if (this.remember(tag)) {
       this.persist();
-      await this.publishDevices();
+      this.scheduleDiscovery();
     }
     this.queueTagStates(tag);
+  }
+
+  /** One Discovery publication at most every TIMINGS.discoveryDelay for websocket changes. */
+  scheduleDiscovery() {
+    if (this.named.has('discovery')) {
+      return;
+    }
+    this.setNamed('discovery', this.timings.discoveryDelay, () => this.publishDevices());
   }
 
   /** Keeps a tag record; true when /data changed (a new tag, a new name or type). */
@@ -869,7 +892,7 @@ export class OeplApp {
         type = await api.tagType(tag.hwType).catch((err) => {
           throw err instanceof ApError && err.kind === KINDS.BAD_RESPONSE
             ? new Error(E.noDisplay)
-            : err;
+            : this.uploadError(err, false, true);
         });
         check();
         this.tagTypes.set(tag.hwType, type);
@@ -886,7 +909,7 @@ export class OeplApp {
       }
       return type.colors.get(name) ?? DEFAULT_COLORS[name];
     };
-    const { pixels } = renderText(job.text, {
+    const { pixels, lines } = renderText(job.text, {
       width: type.width,
       height: type.height,
       ink: color(job.ink),
@@ -894,6 +917,10 @@ export class OeplApp {
       size: job.size,
       align: job.align,
     });
+    if (lines.length === 0) {
+      // Not one character fits: an empty image is never announced as shown.
+      throw new Error(E.tooSmall);
+    }
     let jpeg;
     for (const quality of QUALITIES) {
       try {
@@ -929,8 +956,12 @@ export class OeplApp {
     return { accepted: true };
   }
 
-  /** The error a failed text ends with; `sending`: the upload itself had started. */
-  uploadError(err, sending) {
+  /**
+   * The error a failed text ends with; `sending`: the upload itself had
+   * started; `secondary`: a display type or upload request, whose 5xx only
+   * holds the uploads (the readings and the websocket go on).
+   */
+  uploadError(err, sending, secondary = sending) {
     if (!(err instanceof ApError)) {
       return err instanceof Error ? err : new Error(String(err));
     }
@@ -948,8 +979,23 @@ export class OeplApp {
             this.timings.busyMax,
           );
         return new Error(E.busy);
-      case KINDS.RATE_LIMITED:
       case KINDS.UNAVAILABLE:
+        if (secondary) {
+          this.busyUntil = Math.max(
+            this.busyUntil,
+            this.now() +
+              clamp(
+                Number.isFinite(err.retryAfterMs) ? err.retryAfterMs : this.timings.pause5xx,
+                this.timings.busyMin,
+                this.timings.busyMax,
+              ),
+          );
+          return new Error(E.failed(err.status));
+        }
+        this.pause(err);
+        this.background(() => this.updateStatus());
+        return new Error(E.failed(err.status));
+      case KINDS.RATE_LIMITED:
         this.pause(err);
         this.background(() => this.updateStatus());
         return new Error(E.failed(err.status));

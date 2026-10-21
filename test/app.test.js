@@ -421,20 +421,156 @@ test('show a text: 409 busy pauses the uploads, a timeout is "sent, without conf
   assert.match((await slow).error, /sent, without confirmation/);
 });
 
-test('show a text: a 5xx of the upload pauses everything, kept in /data', async (t) => {
-  const { gladys, ap, store, clock } = await createdAll(t);
+test('M8 show a text: a 5xx of the upload or the display type holds the uploads only', async (t) => {
+  const { gladys, ap, store, clock, app } = await createdAll(t);
   ap.statuses.set('/imgupload', 500);
   const failed = await show(gladys, { tag: tagId(KITCHEN), text: 'x' });
   assert.match(failed.error, /refused the text \(500\)/);
-  assert.equal(store.data.pause.until, clock.now() + TIMINGS.pause5xx);
-  const paused = await show(gladys, { tag: tagId(DESK), text: 'y' });
-  assert.match(paused.error, /slow down/);
+  assert.equal(store.data.pause, null, 'no global pause');
+  assert.equal(app.ws?.closed, false, 'the websocket stays open');
+  // The uploads wait (5 min by default): the next text cannot leave in time.
+  ap.statuses.clear();
+  const held = await show(gladys, { tag: tagId(DESK), text: 'y' });
+  assert.match(held.error, /No time left/);
+  // A 5xx of /tagtypes neither.
+  await clock.advance(TIMINGS.pause5xx);
+  ap.statuses.set('/tagtypes/00.json', 503);
+  const type = await show(gladys, { tag: tagId(DESK), text: 'y' });
+  assert.match(type.error, /\(503\)/);
+  assert.equal(store.data.pause, null);
+  ap.push({ sys: { apstate: 1, timeoutcount: 4 } });
+  await clock.advance(TIMINGS.flushInterval);
+  assert.equal(gladys.fake.lastState(apId('timeout_tags')), 4, 'readings go on');
 });
 
-test('nothing in /data but tags, the pause and the attempt time', async (t) => {
+test('nothing in /data but tags, the pause, the attempt time and the last list reading', async (t) => {
   const { store, clock } = await createdAll(t);
   await clock.advance(2_000);
-  assert.deepEqual(Object.keys(store.data).sort(), ['attemptAt', 'pause', 'tags']);
+  assert.deepEqual(Object.keys(store.data).sort(), ['attemptAt', 'pause', 'resync', 'tags']);
+  assert.deepEqual(Object.keys(store.data.resync).sort(), ['at', 'fingerprint']);
   assert.deepEqual(Object.keys(store.data.tags).sort(), [KITCHEN, DESK].sort());
   assert.deepEqual(store.data.tags[KITCHEN], { mac: KITCHEN, alias: 'Cuisine', hwType: 1 });
+});
+
+/** The fake access point, its first 101 answer followed by `extra` bytes in the same chunk. */
+function coalesced101(extra, { once = true } = {}) {
+  const ap = fakeAp();
+  const original = ap.connect;
+  let first = true;
+  ap.connect = (opts) => {
+    const socket = original(opts);
+    if (first || !once) {
+      first = false;
+      const emit = socket.emit.bind(socket);
+      socket.emit = (event, data) =>
+        event === 'data' && String(data).startsWith('HTTP/1.1 101')
+          ? emit('data', Buffer.concat([data, extra]))
+          : emit(event, data);
+    }
+    return socket;
+  };
+  return ap;
+}
+
+test('I1 a close frame in the same chunk as the 101: a failed attempt, reconnected after the backoff', async (t) => {
+  const ap = coalesced101(Buffer.from([0x88, 2, 0x03, 0xe9]));
+  const { app, clock, gladys } = await setup(t, { ap });
+  assert.equal(app.ws, undefined);
+  assert.notEqual(app.phase, 'ready');
+  assert.equal(gladys.fake.connectionStatus.connected, false);
+  await clock.advance(TIMINGS.reconnect[0]);
+  assert.equal(ap.sockets.length, 2);
+  assert.equal(app.phase, 'ready');
+  assert.equal(app.ws.closed, false);
+  assert.equal(gladys.fake.connectionStatus.connected, true);
+});
+
+test('I1 a message in the same chunk as the 101 is read once the client is attached', async (t) => {
+  const ap = coalesced101(serverFrame(JSON.stringify({ sys: { apstate: 1, lowbattcount: 7 } })));
+  const { app } = await setup(t, { ap });
+  assert.equal(app.view.sys?.lowBattery, 7);
+});
+
+test('M2 a websocket alternating a tag name: the Discovery is published at most every 5 s', async (t) => {
+  const { gladys, ap, clock } = await setup(t);
+  let publishes = 0;
+  const original = gladys.publishDiscoveredDevices.bind(gladys);
+  gladys.publishDiscoveredDevices = async (devices) => {
+    publishes += 1;
+    return original(devices);
+  };
+  for (let i = 0; i < 500; i += 1) {
+    ap.push({ tags: [tagRecord(KITCHEN, { alias: i % 2 ? 'A' : 'B' })] });
+  }
+  await clock.settle(50);
+  assert.equal(publishes, 0);
+  await clock.advance(TIMINGS.discoveryDelay);
+  assert.equal(publishes, 1);
+  assert.equal(gladys.fake.discoveredDevices[1].name, 'A');
+});
+
+test('M3 a new address while the Discovery is published: the old client opens no websocket', async (t) => {
+  const ap = fakeAp();
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const clock = fakeClock();
+  const gladys = createFakeGladys({ selector: SELECTOR, config: CONFIG });
+  const original = gladys.publishDiscoveredDevices.bind(gladys);
+  let calls = 0;
+  gladys.publishDiscoveredDevices = async (devices) => {
+    calls += 1;
+    // The publication of the first tag list waits.
+    if (calls === 2) {
+      await gate;
+    }
+    return original(devices);
+  };
+  const app = new OeplApp({
+    gladys,
+    logger: { debug() {}, info() {}, warn() {}, error() {} },
+    store: new MemoryStore(),
+    fetchImpl: ap.fetch,
+    connectSocket: ap.connect,
+    now: clock.now,
+    timers: clock.timers,
+  });
+  registerHandlers(gladys, app);
+  t.after(() => app.stop());
+  await gladys.connect();
+  await clock.advance(0);
+  assert.equal(ap.sockets.length, 0, 'held in the Discovery publication');
+  await gladys.fake.configUpdated({ host: '192.168.1.31' });
+  release();
+  await clock.settle();
+  assert.equal(ap.sockets.filter((s) => s.host === HOST).length, 0);
+  await clock.advance(TIMINGS.attemptSpacing);
+  assert.equal(ap.sockets.at(-1).host, '192.168.1.31');
+});
+
+test('M4 the last tag list reading is kept in /data: a restart does not read it again sooner', async (t) => {
+  const store = new MemoryStore();
+  const clock = fakeClock();
+  const first = await setup(t, { store, clock });
+  assert.equal(first.ap.count('/get_db'), 1);
+  await first.app.stop();
+  await clock.advance(MINUTE);
+  const second = await setup(t, { store, clock });
+  await clock.advance(TIMINGS.attemptSpacing);
+  assert.equal(second.ap.count('/get_db'), 0);
+  assert.equal(second.ap.sockets.length, 1);
+  // Another address reads its list at once.
+  await second.gladys.fake.configUpdated({ host: '192.168.1.31' });
+  await clock.advance(TIMINGS.attemptSpacing);
+  assert.equal(second.ap.count('/get_db'), 1);
+});
+
+test('M6 a display too small for one character: refused, nothing uploaded', async (t) => {
+  const { gladys, ap } = await createdAll(t);
+  ap.tagTypes['00'] = { width: 8, height: 8, colortable: {} };
+  const ack = await show(gladys, { tag: tagId(DESK), text: 'Bonjour' });
+  assert.equal(ack.success, false);
+  assert.match(ack.error, /too small/);
+  assert.equal(ap.uploads.length, 0);
 });

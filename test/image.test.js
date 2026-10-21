@@ -39,6 +39,14 @@ test('cleaning: control and invisible characters dropped, typography simplified,
   assert.equal(cleanDisplayText('a\n'.repeat(100)).split('\n').length, LIMITS.textLines);
 });
 
+test('M5 leading blanks never eat the budget, blanks merged', () => {
+  assert.equal(cleanDisplayText('\n'.repeat(1000) + 'a'), 'a');
+  assert.equal(cleanDisplayText(' '.repeat(300) + 'Bonjour'), 'Bonjour');
+  assert.equal(cleanDisplayText(' '.repeat(10_000_000) + 'x'), 'x');
+  assert.equal(cleanDisplayText('a\n\n\n\n\nb   c'), 'a\n\nb c');
+  assert.equal(cleanDisplayText(`a${'\n'.repeat(500)}${'b'.repeat(400)}`).length, LIMITS.textChars);
+});
+
 test('wrapping: words kept whole, long words cut, line breaks kept', () => {
   assert.deepEqual(wrap('le chat dort', 7), ['le chat', 'dort']);
   assert.deepEqual(wrap('anticonstitutionnel', 8), ['anticons', 'titution', 'nel']);

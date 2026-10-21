@@ -37,4 +37,22 @@ the notes of the version's GitHub Release.
   published again keeps every feature of the created one.
 - `LICENSE` (Apache-2.0) and `THIRD_PARTY_NOTICES.md`, copied into the image.
 
+### Fixed
+
+- A close frame in the same packet as the websocket handshake no longer
+  leaves the integration "connected" on a dead socket: it reconnects after
+  the backoff; a message in that packet is no longer lost.
+- A ping flood or an access point that stops reading closes the websocket
+  instead of piling up answers in memory.
+- A large first message right after the handshake no longer fails it.
+- A websocket frame left unfinished closes after 30 s; the handshake must be
+  a real websocket upgrade, without extension; text must be valid UTF-8.
+- A tag renamed many times republishes the Discovery at most every 5 s.
+- A restart no longer reads the whole tag list again within 15 minutes.
+- Leading blank lines and spaces no longer eat the 280 characters of a text.
+- A display too small for one character refuses the text instead of
+  reporting an empty image as shown.
+- A 5xx of the display type or of the upload only holds the uploads, no
+  longer the readings and the websocket.
+
 [Unreleased]: https://github.com/LM1LC3N7/gladys-openepaperlink/commits/main

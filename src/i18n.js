@@ -68,6 +68,7 @@ export const E = {
   noColor: (color) => `This display has no ${color}: nothing sent`,
   unknownTag: 'The access point does not know this tag (another access point?): nothing sent',
   noDisplay: 'The size of this display is unknown to the access point: nothing sent',
+  tooSmall: 'This display is too small for one character: nothing sent',
   tooLarge: 'The image of this text is too large for the access point: nothing sent',
   queueFull: 'Too many texts are waiting for the access point: nothing sent',
   replaced: 'Replaced by a newer text for the same tag: not sent',

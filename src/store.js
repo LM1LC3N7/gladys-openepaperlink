@@ -8,7 +8,9 @@
 //   pause        the end of a pause asked by the access point (429, 5xx);
 //   attemptAt    the time of the last connection attempt (written at most
 //                once a minute), so a container restarting in a loop never
-//                connects faster than the spacing.
+//                connects faster than the spacing;
+//   resync       when the tag list was last read, and for which address, so
+//                a restart does not read it again sooner than 15 minutes.
 //
 // The tag table has no prototype and only 16-hex-digit MACs are keys.
 // -----------------------------------------------------------------------------
@@ -23,6 +25,7 @@ export const emptyData = () => ({
   tags: Object.create(null),
   pause: null,
   attemptAt: null,
+  resync: null,
 });
 
 const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -48,6 +51,11 @@ export function sanitize(data, now = Date.now()) {
   if (isObject(p) && Number.isFinite(p.until) && p.until > now) {
     // A saved end is never trusted beyond the longest pause.
     base.pause = { until: Math.min(p.until, now + TIMINGS.pauseMax) };
+  }
+  const r = data.resync;
+  if (isObject(r) && Number.isFinite(r.at) && typeof r.fingerprint === 'string') {
+    // A time in the future counts as now; the address is only compared.
+    base.resync = { at: Math.min(r.at, now), fingerprint: r.fingerprint.slice(0, 300) };
   }
   if (Number.isFinite(data.attemptAt)) {
     // A time in the future (a clock set back) counts as now.

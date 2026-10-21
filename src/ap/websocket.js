@@ -3,8 +3,11 @@
 // `ws://<access point>/ws` events. Written here rather than taken from Node's
 // global WebSocket so every bound is ours:
 //
-//   - the handshake answer is read up to LIMITS.wsHandshakeBytes, within
-//     TIMINGS.handshakeTimeout, and its Sec-WebSocket-Accept is checked;
+//   - the headers of the handshake answer are read into one fixed buffer of
+//     LIMITS.wsHandshakeBytes, within TIMINGS.handshakeTimeout; status,
+//     Upgrade, Connection and Sec-WebSocket-Accept are checked, an extension
+//     or a subprotocol is refused; the bytes after them reach the parser at
+//     the next turn, once the caller attached the client;
 //   - a frame is parsed by a state machine: its header in a 14-byte buffer,
 //     its payload copied once into a buffer of its announced size (refused
 //     beyond LIMITS.wsMessageBytes before any byte of it is kept): no
@@ -13,7 +16,11 @@
 //     LIMITS.wsMessageBytes in all, joined once at its last frame;
 //   - frames from the server must not be masked; ours always are;
 //   - a ping every TIMINGS.pingInterval, and no byte for TIMINGS.idleTimeout
-//     closes the connection.
+//     closes the connection; a frame or message unfinished after
+//     TIMINGS.frameTimeout too;
+//   - at most LIMITS.wsPingsInARow pings in a row, one pong waiting at most,
+//     and a peer that leaves LIMITS.wsPendingWrite unread is closed;
+//   - text is strict UTF-8; a close frame of one byte is a protocol error.
 //
 // The socket comes from a factory (`net.connect` by default) so the tests can
 // use a real local server.
@@ -26,6 +33,8 @@ import { ApError, KINDS } from './errors.js';
 
 const GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 const OP = Object.freeze({ CONT: 0, TEXT: 1, BINARY: 2, CLOSE: 8, PING: 9, PONG: 10 });
+/** Strict UTF-8: a text message with invalid bytes is a protocol error. */
+const UTF8 = new TextDecoder('utf-8', { fatal: true });
 
 /** The value of Sec-WebSocket-Accept for a key. */
 export const acceptFor = (key) =>
@@ -71,6 +80,11 @@ export class FrameParser {
     this.payloadFill = 0;
     this.fin = false;
     this.opcode = 0;
+  }
+
+  /** True while a frame is started but not complete. */
+  get busy() {
+    return this.headerFill > 0 || this.payload !== undefined;
   }
 
   push(chunk) {
@@ -184,13 +198,22 @@ export class WsClient {
     this.fragments = [];
     this.fragmentBytes = 0;
     this.fragmentOpcode = 0;
+    this.parser = undefined;
+    /** Bytes received in the handshake turn, parsed at the next turn. */
+    this.held = undefined;
+    this.frameTimer = undefined;
+    this.pingsInARow = 0;
+    this.pongPending = false;
   }
 
   open() {
     return new Promise((resolve, reject) => {
       const key = randomBytes(16).toString('base64');
       let handshake = true;
-      let head = Buffer.alloc(0);
+      // The handshake answer goes into one buffer sized once: only its
+      // headers are bounded, what follows them goes to the frame parser.
+      const head = Buffer.allocUnsafe(LIMITS.wsHandshakeBytes);
+      let headLength = 0;
       let settled = false;
       const fail = (err) => {
         if (!settled) {
@@ -206,7 +229,7 @@ export class WsClient {
         () => fail(new ApError(KINDS.NO_ANSWER, 'No websocket handshake in time')),
         this.timings.handshakeTimeout,
       );
-      const parser = new FrameParser({
+      this.parser = new FrameParser({
         maxPayload: this.maxMessage,
         onFrame: (frame) => this.frame(frame),
       });
@@ -225,42 +248,36 @@ export class WsClient {
         );
       });
       socket.on('data', (chunk) => {
+        if (this.closed) {
+          return;
+        }
         this.armIdle();
         try {
           if (!handshake) {
-            parser.push(chunk);
+            this.receive(chunk);
             return;
           }
-          // The handshake answer: small, bounded, read until its blank line.
-          if (head.length + chunk.length > LIMITS.wsHandshakeBytes) {
-            throw new ApError(KINDS.PROTOCOL, 'Websocket handshake answer too long');
-          }
-          head = Buffer.concat([head, chunk]);
-          const end = head.indexOf('\r\n\r\n');
+          const before = headLength;
+          const take = Math.min(chunk.length, head.length - headLength);
+          chunk.copy(head, headLength, 0, take);
+          headLength += take;
+          const end = head.subarray(0, headLength).indexOf('\r\n\r\n', Math.max(0, before - 3));
           if (end < 0) {
+            if (headLength >= head.length) {
+              throw new ApError(KINDS.PROTOCOL, 'Websocket handshake answer too long');
+            }
             return;
           }
-          const lines = head.subarray(0, end).toString('latin1').split('\r\n');
-          if (!/^HTTP\/1\.1 101\b/.test(lines[0] ?? '')) {
-            throw new ApError(KINDS.HTTP, `Websocket refused (${(lines[0] ?? '').slice(0, 40)})`);
-          }
-          const accept = lines
-            .slice(1)
-            .map((l) => l.match(/^sec-websocket-accept:\s*(\S+)\s*$/i))
-            .find(Boolean)?.[1];
-          if (accept !== acceptFor(key)) {
-            throw new ApError(KINDS.PROTOCOL, 'Websocket handshake not acknowledged');
-          }
+          this.checkHandshake(head.subarray(0, end).toString('latin1'), key);
           handshake = false;
           this.timers.clearTimeout(handshakeTimer);
           settled = true;
           this.startPing();
+          // What came after the headers is held until the next turn, so the
+          // caller has attached this client before any message or close.
+          this.held = [chunk.subarray(end + 4 - before)];
           resolve();
-          const rest = head.subarray(end + 4);
-          head = undefined;
-          if (rest.length) {
-            parser.push(rest);
-          }
+          setImmediate(() => this.release());
         } catch (err) {
           this.timers.clearTimeout(handshakeTimer);
           fail(err);
@@ -291,14 +308,113 @@ export class WsClient {
     });
   }
 
+  /** The 101 answer: status, Upgrade, Connection, accept key; no extension nor subprotocol. */
+  checkHandshake(text, key) {
+    const [status, ...lines] = text.split('\r\n');
+    if (!/^HTTP\/1\.1 101\b/.test(status ?? '')) {
+      throw new ApError(KINDS.HTTP, `Websocket refused (${(status ?? '').slice(0, 40)})`);
+    }
+    const headers = new Map();
+    for (const line of lines) {
+      const colon = line.indexOf(':');
+      if (colon > 0) {
+        headers.set(line.slice(0, colon).trim().toLowerCase(), line.slice(colon + 1).trim());
+      }
+    }
+    if ((headers.get('upgrade') ?? '').toLowerCase() !== 'websocket') {
+      throw new ApError(KINDS.PROTOCOL, 'Websocket handshake without Upgrade: websocket');
+    }
+    const connection = (headers.get('connection') ?? '').toLowerCase().split(/\s*,\s*/);
+    if (!connection.includes('upgrade')) {
+      throw new ApError(KINDS.PROTOCOL, 'Websocket handshake without Connection: Upgrade');
+    }
+    if (headers.has('sec-websocket-extensions') || headers.has('sec-websocket-protocol')) {
+      throw new ApError(KINDS.PROTOCOL, 'Websocket extension or subprotocol not asked for');
+    }
+    if (headers.get('sec-websocket-accept') !== acceptFor(key)) {
+      throw new ApError(KINDS.PROTOCOL, 'Websocket handshake not acknowledged');
+    }
+  }
+
+  /** Bytes after the handshake: held until released, then parsed in order. */
+  receive(chunk) {
+    if (this.held) {
+      this.held.push(chunk);
+      return;
+    }
+    this.parser.push(chunk);
+    this.watchFrame();
+  }
+
+  /** The bytes held during the handshake turn, parsed once the caller attached. */
+  release() {
+    const held = this.held ?? [];
+    this.held = undefined;
+    if (this.closed) {
+      return;
+    }
+    try {
+      for (const chunk of held) {
+        if (chunk.length) {
+          this.parser.push(chunk);
+        }
+        if (this.closed) {
+          return;
+        }
+      }
+      this.watchFrame();
+    } catch (err) {
+      this.end(err?.message ?? 'error');
+    }
+  }
+
+  /**
+   * A frame or a message left unfinished has TIMINGS.frameTimeout from its
+   * first byte to complete (a byte now and then never keeps it open).
+   */
+  watchFrame() {
+    const busy = this.parser.busy || this.fragments.length > 0;
+    if (!busy) {
+      this.timers.clearTimeout(this.frameTimer);
+      this.frameTimer = undefined;
+    } else if (!this.frameTimer && !this.closed) {
+      this.frameTimer = this.timers.setTimeout(
+        () => this.end('websocket frame not completed in time'),
+        this.timings.frameTimeout,
+      );
+    }
+  }
+
   frame({ fin, opcode, payload }) {
+    if (this.closed) {
+      return;
+    }
+    if (opcode === OP.PING) {
+      // A ping flood, or a peer that does not read what we write: closed.
+      this.pingsInARow += 1;
+      if (this.pingsInARow > LIMITS.wsPingsInARow) {
+        throw new ApError(KINDS.PROTOCOL, 'Too many websocket pings');
+      }
+      if ((this.socket?.writableLength ?? 0) > LIMITS.wsPendingWrite) {
+        throw new ApError(KINDS.PROTOCOL, 'The access point does not read the websocket');
+      }
+      // One pong waiting at most: a later ping is answered once it is written.
+      if (!this.pongPending && !this.closed && this.socket && !this.socket.destroyed) {
+        this.pongPending = true;
+        this.socket.write(encodeFrame(OP.PONG, payload), () => {
+          this.pongPending = false;
+        });
+      }
+      return;
+    }
+    this.pingsInARow = 0;
     switch (opcode) {
-      case OP.PING:
-        this.send(OP.PONG, payload);
-        return;
       case OP.PONG:
         return;
       case OP.CLOSE:
+        if (payload.length === 1) {
+          throw new ApError(KINDS.PROTOCOL, 'Websocket close frame of one byte');
+        }
         this.send(OP.CLOSE, payload.subarray(0, 2));
         this.end('closed by the access point');
         return;
@@ -330,18 +446,30 @@ export class WsClient {
     this.fragments = [];
     this.fragmentBytes = 0;
     if (text) {
+      let decoded;
       try {
-        this.onMessage(message.toString('utf8'));
+        decoded = UTF8.decode(message);
+      } catch {
+        throw new ApError(KINDS.PROTOCOL, 'Websocket text that is not UTF-8');
+      }
+      try {
+        this.onMessage(decoded);
       } catch {
         // A handler error is the app's own: it never breaks the connection.
       }
     }
   }
 
+  /** Writes a frame; a peer that does not read (64 KB waiting) is closed instead. */
   send(opcode, payload) {
-    if (!this.closed && this.socket && !this.socket.destroyed) {
-      this.socket.write(encodeFrame(opcode, payload));
+    if (this.closed || !this.socket || this.socket.destroyed) {
+      return;
     }
+    if ((this.socket.writableLength ?? 0) > LIMITS.wsPendingWrite) {
+      this.end('the access point does not read the websocket');
+      return;
+    }
+    this.socket.write(encodeFrame(opcode, payload));
   }
 
   startPing() {
@@ -375,6 +503,8 @@ export class WsClient {
     this.closed = true;
     this.timers.clearTimeout(this.pingTimer);
     this.timers.clearTimeout(this.idleTimer);
+    this.timers.clearTimeout(this.frameTimer);
+    this.held = undefined;
     this.socket?.destroy();
     this.onClose(reason);
   }
