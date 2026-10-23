@@ -6,8 +6,8 @@
     "en": "OpenEPaperLink e-paper tags: battery, temperature, last contact, and texts shown from scenes.",
     "fr": "Étiquettes e-paper OpenEPaperLink : batterie, température, dernier contact, textes des scènes."
   },
-  "version": "0.1.1",
-  "docker_image": "ghcr.io/lm1lc3n7/gladys-openepaperlink:0.1.1",
+  "version": "0.1.2",
+  "docker_image": "ghcr.io/lm1lc3n7/gladys-openepaperlink:0.1.2",
   "gladys_version": ">=5.1.0",
   "cover_image": "https://raw.githubusercontent.com/LM1LC3N7/gladys-openepaperlink/main/cover.png",
   "categories": ["multimedia"],

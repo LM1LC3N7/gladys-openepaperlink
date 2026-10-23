@@ -1,6 +1,6 @@
 {
   "name": "gladys-openepaperlink",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "description": "Gladys Assistant external integration for OpenEPaperLink e-paper tags, through the local HTTP API and websocket of the access point: battery, temperature, last contact of each tag, state of the access point, and a scene action that shows a text on a tag. Unofficial, not affiliated with the OpenEPaperLink project.",
   "type": "module",
